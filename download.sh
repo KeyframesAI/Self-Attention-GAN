@@ -2,7 +2,7 @@ FILE=$1
 
 if [ $FILE == 'CelebA' ]
 then
-    URL=https://www.dropbox.com/s/3e5cmqgplchz85o/CelebA_nocrop.zip?dl=0
+    URL=https://drive.google.com/uc?id=1O7m1010EJjLE5QxLZiM9Fpjs7Oj6e684
     ZIP_FILE=./data/CelebA.zip
 
 elif [ $FILE == 'LSUN' ]

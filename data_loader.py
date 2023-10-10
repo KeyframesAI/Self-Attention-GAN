@@ -1,6 +1,7 @@
 import torch
 import torchvision.datasets as dsets
 from torchvision import transforms
+import frame_dataset
 
 
 class Data_Loader():
@@ -37,6 +38,9 @@ class Data_Loader():
 
 
     def loader(self):
+        if self.dataset == 'frames':
+            return torch.utils.data.DataLoader(dataset=frame_dataset.FrameDataset(self.imsize), batch_size=self.batch, shuffle=self.shuf, num_workers=2, drop_last=True)
+    
         if self.dataset == 'lsun':
             dataset = self.load_lsun()
         elif self.dataset == 'celeb':

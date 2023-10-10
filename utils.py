@@ -23,3 +23,9 @@ def denorm(x):
     out = (x + 1) / 2
     return out.clamp_(0, 1)
 
+def getFrames(imgs):
+    pres = imgs[:, 0]
+    lats = imgs[:, 2]
+    mids = imgs[:, 1]
+    return pres.to('cuda'), lats.to('cuda'), mids.to('cuda')
+    

@@ -8,7 +8,7 @@ import torch.nn as nn
 from torch.autograd import Variable
 from torchvision.utils import save_image
 
-from sagan_models import Generator, Discriminator
+from sagan_models import Generator, Discriminator, GeneratorWithCondition_NoNoise
 from utils import *
 
 class Trainer(object):
@@ -66,7 +66,7 @@ class Trainer(object):
         if self.pretrained_model:
             self.load_pretrained_model()
 
-
+    
 
     def train(self):
 
@@ -74,9 +74,15 @@ class Trainer(object):
         data_iter = iter(self.data_loader)
         step_per_epoch = len(self.data_loader)
         model_save_step = int(self.model_save_step * step_per_epoch)
+        
+        print('steps per epoch:' + str(step_per_epoch))
 
         # Fixed input for debugging
         fixed_z = tensor2var(torch.randn(self.batch_size, self.z_dim))
+        if self.dataset == 'frames':
+            fixed_imgs, _ = next(data_iter)
+            fixed_input1, fixed_input2, fixed_expected = getFrames(fixed_imgs)
+            
 
         # Start with trained model
         if self.pretrained_model:
@@ -93,10 +99,20 @@ class Trainer(object):
             self.G.train()
 
             try:
-                real_images, _ = next(data_iter)
+                imgs, _ = next(data_iter)
             except:
                 data_iter = iter(self.data_loader)
-                real_images, _ = next(data_iter)
+                imgs, _ = next(data_iter)
+            
+            input1 = None
+            input2 = None
+            if self.dataset == 'frames':
+                pres = imgs[:, 0]
+                lats = imgs[:, 2]
+                mids = imgs[:, 1]
+                input1, input2, real_images = getFrames(imgs)
+            else:
+                real_images = imgs
 
             # Compute loss with real images
             # dr1, dr2, df1, df2, gf1, gf2 are attention scores
@@ -109,7 +125,10 @@ class Trainer(object):
 
             # apply Gumbel Softmax
             z = tensor2var(torch.randn(real_images.size(0), self.z_dim))
-            fake_images,gf1,gf2 = self.G(z)
+            if self.dataset == 'frames':
+                fake_images,gf1 = self.G(input1.data, input2.data)
+            else:
+                fake_images,gf1,gf2 = self.G(z)
             d_out_fake,df1,df2 = self.D(fake_images)
 
             if self.adv_loss == 'wgan-gp':
@@ -152,7 +171,10 @@ class Trainer(object):
             # ================== Train G and gumbel ================== #
             # Create random noise
             z = tensor2var(torch.randn(real_images.size(0), self.z_dim))
-            fake_images,_,_ = self.G(z)
+            if self.dataset == 'frames':
+                fake_images,_ = self.G(input1.data, input2.data)
+            else:
+                fake_images,_,_ = self.G(z)
 
             # Compute loss with fake images
             g_out_fake,_,_ = self.D(fake_images)  # batch x n
@@ -170,16 +192,35 @@ class Trainer(object):
             if (step + 1) % self.log_step == 0:
                 elapsed = time.time() - start_time
                 elapsed = str(datetime.timedelta(seconds=elapsed))
-                print("Elapsed [{}], G_step [{}/{}], D_step[{}/{}], d_out_real: {:.4f}, "
-                      " ave_gamma_l3: {:.4f}, ave_gamma_l4: {:.4f}".
-                      format(elapsed, step + 1, self.total_step, (step + 1),
-                             self.total_step , d_loss_real.data[0],
-                             self.G.attn1.gamma.mean().data[0], self.G.attn2.gamma.mean().data[0] ))
+                if self.dataset == 'frames':
+                    print("Elapsed [{}], G_step [{}/{}], D_step[{}/{}], d_out_real: {:.4f}, "
+                          " ave_gamma_l3: {:.4f}".
+                          format(elapsed, step + 1, self.total_step, (step + 1),
+                                 self.total_step , d_loss_real.data,
+                                 self.G.attn1.gamma.mean().data ))
+                else:
+                    print("Elapsed [{}], G_step [{}/{}], D_step[{}/{}], d_out_real: {:.4f}, "
+                          " ave_gamma_l3: {:.4f}, ave_gamma_l4: {:.4f}".
+                          format(elapsed, step + 1, self.total_step, (step + 1),
+                                 self.total_step , d_loss_real.data,
+                                 self.G.attn1.gamma.mean().data, self.G.attn2.gamma.mean().data ))
 
             # Sample images
             if (step + 1) % self.sample_step == 0:
-                fake_images,_,_= self.G(fixed_z)
-                save_image(denorm(fake_images.data),
+                if self.dataset == 'frames':
+                    fake_images,_ = self.G(fixed_input1.data, fixed_input2.data)
+                    save_image(denorm(fixed_expected.data),
+                           os.path.join(self.sample_path, '{}_b_real.png'.format(step + 1)))
+                    save_image(denorm(fake_images.data),
+                       os.path.join(self.sample_path, '{}_b_fake.png'.format(step + 1)))
+                    save_image(denorm(fixed_expected.data),
+                           os.path.join(self.sample_path, '{}_a.png'.format(step + 1)))
+                    save_image(denorm(fixed_expected.data),
+                           os.path.join(self.sample_path, '{}_c.png'.format(step + 1)))
+                    
+                else:
+                    fake_images,_,_= self.G(fixed_z)
+                    save_image(denorm(fake_images.data),
                            os.path.join(self.sample_path, '{}_fake.png'.format(step + 1)))
 
             if (step+1) % model_save_step==0:
@@ -189,8 +230,10 @@ class Trainer(object):
                            os.path.join(self.model_save_path, '{}_D.pth'.format(step + 1)))
 
     def build_model(self):
-
-        self.G = Generator(self.batch_size,self.imsize, self.z_dim, self.g_conv_dim).cuda()
+        if self.dataset == 'frames':
+            self.G = GeneratorWithCondition_NoNoise(self.batch_size,self.imsize, self.z_dim, self.g_conv_dim).cuda()
+        else:
+            self.G = Generator(self.batch_size,self.imsize, self.z_dim, self.g_conv_dim).cuda()
         self.D = Discriminator(self.batch_size,self.imsize, self.d_conv_dim).cuda()
         if self.parallel:
             self.G = nn.DataParallel(self.G)

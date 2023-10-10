@@ -4,6 +4,8 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 from spectral import SpectralNorm
 import numpy as np
+import os
+import sys
 
 class Self_Attn(nn.Module):
     """ Self attention Layer"""
@@ -146,8 +148,67 @@ class Discriminator(nn.Module):
         out = self.l2(out)
         out = self.l3(out)
         out,p1 = self.attn1(out)
-        out=self.l4(out)
-        out,p2 = self.attn2(out)
+        p2 = 0
+        if self.imsize == 64:
+            out=self.l4(out)
+            out,p2 = self.attn2(out)
         out=self.last(out)
 
         return out.squeeze(), p1, p2
+
+
+class GeneratorWithCondition_NoNoise(nn.Module):
+    '''
+    A generator without noise z
+    '''
+
+    
+    def __init__(self, batch_size, image_size=64, z_dim=100, conv_dim=64):
+        super(GeneratorWithCondition_NoNoise, self).__init__()
+        self.nfg = conv_dim  # the size of feature map
+        self.c = 3  # output channel
+        filter_size = 4
+        stride_size = 2
+        
+        self.down_sample_blocks = nn.Sequential(
+            nn.Conv2d(self.c *2, self.nfg * 2, kernel_size=3, stride=1, padding=1, bias=False),  # size
+            nn.BatchNorm2d(self.nfg * 2),
+            nn.LeakyReLU(0.02, inplace=True),
+            nn.Conv2d(self.nfg * 2, self.nfg * 2, kernel_size=filter_size, stride=stride_size, padding=1, bias=False),  # size/2
+            nn.BatchNorm2d(self.nfg * 2),
+            nn.LeakyReLU(0.02, inplace=True),
+            nn.Conv2d(self.nfg * 2, self.nfg * 4, kernel_size=filter_size, stride=stride_size, padding=1, bias=False),  # size/2
+            nn.BatchNorm2d(self.nfg * 4),
+            nn.LeakyReLU(0.02, inplace=True),
+            nn.Conv2d(self.nfg * 4, self.nfg * 8, kernel_size=filter_size, stride=stride_size, padding=1, bias=False),  # size/2
+            nn.BatchNorm2d(self.nfg * 8),
+            nn.LeakyReLU(0.02, inplace=True)
+            )
+        
+        self.up_sample_block = nn.Sequential(
+            nn.ConvTranspose2d(self.nfg * 8, self.nfg * 4, kernel_size=filter_size, stride=stride_size, padding=1, bias=False),  # size*2
+            nn.BatchNorm2d(self.nfg * 4),
+            nn.LeakyReLU(0.02, inplace=True),
+            nn.ConvTranspose2d(self.nfg * 4, self.nfg * 2, kernel_size=filter_size, stride=stride_size, padding=1, bias=False),  # size*2
+            nn.BatchNorm2d(self.nfg * 2),
+            nn.LeakyReLU(0.02, inplace=True),
+            nn.ConvTranspose2d(self.nfg * 2, self.nfg, kernel_size=filter_size, stride=stride_size, padding=1, bias=False),  # size*2
+            nn.BatchNorm2d(self.nfg),
+            nn.LeakyReLU(0.02, inplace=True),
+            nn.ConvTranspose2d(self.nfg, self.c, kernel_size=3, stride=1, padding=1, bias=False),  # size
+            nn.Tanh()
+            )
+        
+        self.attn1 = Self_Attn( 512, 'relu')
+        #self.attn2 = Self_Attn( 512,  'relu')
+
+    
+    def forward(self, tensor0, tensor2):
+
+        out = torch.cat((tensor0, tensor2), 1) 
+        
+        out_down = self.down_sample_blocks(out)
+        out_down,p1 = self.attn1(out_down)
+        out_up = self.up_sample_block(out_down)
+          
+        return out_up, 0
